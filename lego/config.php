@@ -6,7 +6,8 @@
 //   XAMPP:        DB_PORT 3306, usuário root, senha vazia ('')
 // =====================================================================
 define('DB_HOST', '127.0.0.1');
-define('DB_PORT', '3306');
+//define('DB_PORT', '3306'); //- Agatha
+define('DB_PORT', '3307'); //- Augusto
 define('DB_NAME', 'lego_architecture_store');
 define('DB_USER', 'root');
 define('DB_PASS', 'usbw');
