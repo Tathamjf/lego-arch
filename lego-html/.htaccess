@@ -1,0 +1,13 @@
+# Faz o Apache executar PHP dentro dos arquivos .html (e .htm)
+<IfModule mod_php5.c>
+  AddType application/x-httpd-php .html .htm
+</IfModule>
+<IfModule mod_php7.c>
+  AddType application/x-httpd-php .html .htm
+</IfModule>
+<IfModule mod_php.c>
+  AddType application/x-httpd-php .html .htm
+</IfModule>
+
+DirectoryIndex index.html index.php
+Options -Indexes
