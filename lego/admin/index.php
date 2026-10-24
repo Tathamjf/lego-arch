@@ -1,0 +1,77 @@
+<?php
+require_once __DIR__ . '/../includes/functions.php';
+$admin = require_admin();
+$pdo = db();
+$pageTitle = 'Admin · Produtos e estoque';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    $action = val($_POST, 'action');
+    $pid = (int)val($_POST, 'product_id', 0);
+    if ($action === 'delete') {
+        $pdo->prepare('UPDATE products SET deleted_at = NOW(), is_published = 0 WHERE id = ?')->execute(array($pid));
+        $pdo->prepare('DELETE FROM cart_items WHERE product_id = ?')->execute(array($pid));
+        flash('success', 'Produto removido do catálogo (exclusão lógica).');
+    } elseif ($action === 'toggle') {
+        $pdo->prepare('UPDATE products SET is_published = 1 - is_published WHERE id = ? AND deleted_at IS NULL')->execute(array($pid));
+        flash('success', 'Publicação atualizada.');
+    }
+    redirect('admin/index.php');
+}
+
+$products = $pdo->query('SELECT p.id, p.name, p.price, p.stock_quantity, p.is_published, c.name AS category
+                         FROM products p JOIN categories c ON c.id = p.category_id
+                         WHERE p.deleted_at IS NULL ORDER BY p.id')->fetchAll();
+$stats = array(
+    'total'   => count($products),
+    'out'     => 0,
+    'low'     => 0,
+    'pending' => (int)$pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'pending_payment'")->fetchColumn(),
+);
+foreach ($products as $p) {
+    if ((int)$p['stock_quantity'] === 0) { $stats['out']++; }
+    elseif ((int)$p['stock_quantity'] <= LOW_STOCK) { $stats['low']++; }
+}
+include __DIR__ . '/../includes/header.php';
+?>
+<h1>Painel administrativo</h1>
+<p class="subnav">
+  <a class="btn small" href="<?php echo url('admin/produto_form.php'); ?>">+ Novo produto</a>
+  <a class="btn small" href="<?php echo url('admin/pedidos.php'); ?>">Pedidos</a>
+  <a class="btn small" href="<?php echo url('admin/usuarios.php'); ?>">Usuários</a>
+</p>
+<div class="stats">
+  <div class="stat"><strong><?php echo $stats['total']; ?></strong><span>Produtos</span></div>
+  <div class="stat"><strong><?php echo $stats['out']; ?></strong><span>Sem estoque</span></div>
+  <div class="stat"><strong><?php echo $stats['low']; ?></strong><span>Estoque baixo (≤ <?php echo LOW_STOCK; ?>)</span></div>
+  <div class="stat"><strong><?php echo $stats['pending']; ?></strong><span>Pedidos pendentes</span></div>
+</div>
+
+<table class="table">
+  <thead><tr><th>#</th><th>Produto</th><th>Categoria</th><th>Preço</th><th>Estoque</th><th>Publicado</th><th>Ações</th></tr></thead>
+  <tbody>
+  <?php foreach ($products as $p): $s = (int)$p['stock_quantity']; ?>
+    <tr>
+      <td><?php echo (int)$p['id']; ?></td>
+      <td><?php echo e($p['name']); ?></td>
+      <td><?php echo e($p['category']); ?></td>
+      <td><?php echo money($p['price']); ?></td>
+      <td><span class="badge <?php echo $s === 0 ? 'out' : ($s <= LOW_STOCK ? 'low' : 'ok'); ?>"><?php echo $s; ?></span></td>
+      <td><?php echo $p['is_published'] ? 'Sim' : 'Não'; ?></td>
+      <td class="actions">
+        <a class="btn small" href="<?php echo url('admin/estoque.php?id=' . (int)$p['id']); ?>">Estoque</a>
+        <a class="btn small" href="<?php echo url('admin/produto_form.php?id=' . (int)$p['id']); ?>">Editar</a>
+        <form method="post" class="inline">
+          <?php echo csrf_field(); ?><input type="hidden" name="product_id" value="<?php echo (int)$p['id']; ?>">
+          <button class="btn small" name="action" value="toggle" type="submit"><?php echo $p['is_published'] ? 'Despublicar' : 'Publicar'; ?></button>
+        </form>
+        <form method="post" class="inline" onsubmit="return confirm('Remover este produto do catálogo?');">
+          <?php echo csrf_field(); ?><input type="hidden" name="product_id" value="<?php echo (int)$p['id']; ?>">
+          <button class="btn small danger" name="action" value="delete" type="submit">Excluir</button>
+        </form>
+      </td>
+    </tr>
+  <?php endforeach; ?>
+  </tbody>
+</table>
+<?php include __DIR__ . '/../includes/footer.php'; ?>

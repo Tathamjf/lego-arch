@@ -1,0 +1,73 @@
+<?php
+require_once __DIR__ . '/includes/functions.php';
+$pdo = db();
+$id = (int)val($_GET, 'id', 0);
+
+$st = $pdo->prepare('SELECT p.*, c.name AS category FROM products p
+                     JOIN categories c ON c.id = p.category_id
+                     WHERE p.id = ? AND p.is_published = 1 AND p.deleted_at IS NULL');
+$st->execute(array($id));
+$p = $st->fetch();
+if (!$p) {
+    http_response_code(404); $pageTitle = 'Não encontrado';
+    include __DIR__ . '/includes/header.php';
+    echo '<h1>Projeto não encontrado</h1><p><a class="btn" href="' . url('index.php') . '">Voltar ao catálogo</a></p>';
+    include __DIR__ . '/includes/footer.php'; exit;
+}
+
+$im = $pdo->prepare('SELECT url, alt_text FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order ASC');
+$im->execute(array($id));
+$imgs = $im->fetchAll();
+$main = $imgs ? $imgs[0] : null;
+
+$pageTitle = $p['name'];
+$stock = (int)$p['stock_quantity'];
+include __DIR__ . '/includes/header.php';
+?>
+<div class="crumbs"><a href="<?php echo url('index.php'); ?>">Início</a> › <a href="<?php echo url('index.php#catalogo'); ?>">Projetos</a> › <?php echo e($p['name']); ?></div>
+<div class="detail">
+  <div class="gallery">
+    <?php if (count($imgs) > 1): ?>
+      <div class="thumbs">
+        <?php foreach ($imgs as $k => $img): ?>
+          <img class="<?php echo $k === 0 ? 'on' : ''; ?>" src="<?php echo e(image_url($img['url'])); ?>" alt="" onclick="document.getElementById('mainimg').src=this.src;var t=this.parentNode.children;for(var i=0;i<t.length;i++){t[i].className='';}this.className='on';">
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+    <img id="mainimg" class="main-img" src="<?php echo e(image_url($main ? $main['url'] : null)); ?>" alt="<?php echo e($main && $main['alt_text'] ? $main['alt_text'] : $p['name']); ?>">
+  </div>
+  <div>
+    <small class="muted"><?php echo e($p['category']); ?></small>
+    <h1><?php echo e($p['name']); ?></h1>
+    <p class="price big"><?php echo money($p['price']); ?></p>
+    <p class="muted"><?php echo nl2br(e($p['description'])); ?></p>
+    <ul class="specs">
+      <li><strong>Peças:</strong> <?php echo (int)$p['piece_count']; ?></li>
+      <li><strong>Dificuldade:</strong> <?php echo e(diff_label($p['difficulty'])); ?></li>
+      <?php if ($p['min_age']): ?><li><strong>Idade mínima:</strong> <?php echo (int)$p['min_age']; ?>+</li><?php endif; ?>
+      <?php if ($p['width_cm'] && $p['height_cm'] && $p['depth_cm']): ?>
+        <li><strong>Medidas:</strong> <?php echo e($p['width_cm']); ?> × <?php echo e($p['height_cm']); ?> × <?php echo e($p['depth_cm']); ?> cm</li>
+      <?php endif; ?>
+      <?php if ($p['architect_name']): ?><li><strong>Arquiteto:</strong> <?php echo e($p['architect_name']); ?></li><?php endif; ?>
+    </ul>
+
+    <?php if ($stock === 0): ?>
+      <span class="badge out">Esgotado</span>
+    <?php else: ?>
+      <p class="muted"><?php echo $stock; ?> em estoque</p>
+      <form method="post" action="<?php echo url('carrinho.php'); ?>" class="buy">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="add">
+        <input type="hidden" name="product_id" value="<?php echo (int)$p['id']; ?>">
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="Diminuir"><?php echo icon('minus'); ?></button>
+          <input type="number" name="quantity" value="1" min="1" max="<?php echo $stock; ?>">
+          <button type="button" data-step="1" aria-label="Aumentar"><?php echo icon('plus'); ?></button>
+        </div>
+        <button class="btn" type="submit">Adicionar ao carrinho</button>
+      </form>
+      <?php if (!current_user()): ?><p class="muted">Você precisa <a href="<?php echo url('login.php'); ?>"><u>entrar na sua conta</u></a> para comprar.</p><?php endif; ?>
+    <?php endif; ?>
+  </div>
+</div>
+<?php include __DIR__ . '/includes/footer.php'; ?>

@@ -1,0 +1,141 @@
+<?php
+require_once __DIR__ . '/../includes/functions.php';
+$admin = require_admin();
+$pdo = db();
+$id = (int)val($_GET, 'id', 0);
+$editing = $id > 0;
+
+$f = array('category_id' => '', 'name' => '', 'description' => '', 'price' => '', 'piece_count' => '',
+           'width_cm' => '', 'height_cm' => '', 'depth_cm' => '', 'difficulty' => 'intermediate',
+           'min_age' => '', 'architect_name' => '', 'is_published' => '1', 'image_url' => '', 'stock' => '0');
+
+if ($editing) {
+    $st = $pdo->prepare('SELECT * FROM products WHERE id = ? AND deleted_at IS NULL');
+    $st->execute(array($id));
+    $row = $st->fetch();
+    if (!$row) { flash('error', 'Produto não encontrado.'); redirect('admin/index.php'); }
+    foreach ($f as $k => $_) { if (isset($row[$k])) { $f[$k] = (string)$row[$k]; } }
+    $im = $pdo->prepare('SELECT url FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order ASC LIMIT 1');
+    $im->execute(array($id));
+    $f['image_url'] = (string)$im->fetchColumn();
+}
+
+function num_or_null($v) { $v = str_replace(',', '.', trim($v)); return $v === '' ? null : $v; }
+
+$errors = array();
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    foreach ($f as $k => $_) { $f[$k] = trim(val($_POST, $k)); }
+    $f['is_published'] = isset($_POST['is_published']) ? '1' : '0';
+    $price = str_replace(',', '.', $f['price']);
+
+    if ($f['name'] === '' || mb_strlen($f['name'], 'UTF-8') > 150) { $errors[] = 'Nome obrigatório (até 150 caracteres).'; }
+    if ($f['description'] === '') { $errors[] = 'Descrição obrigatória.'; }
+    if (!is_numeric($price) || $price < 0) { $errors[] = 'Preço inválido.'; }
+    if (!ctype_digit($f['piece_count']) || (int)$f['piece_count'] < 1) { $errors[] = 'Quantidade de peças inválida.'; }
+    if (!in_array($f['difficulty'], array('beginner', 'intermediate', 'advanced', 'expert'), true)) { $errors[] = 'Dificuldade inválida.'; }
+    foreach (array('width_cm', 'height_cm', 'depth_cm') as $dim) {
+        $v = num_or_null($f[$dim]);
+        if ($v !== null && (!is_numeric($v) || $v < 0)) { $errors[] = 'Medida inválida: ' . $dim . '.'; }
+    }
+    if ($f['min_age'] !== '' && (!ctype_digit($f['min_age']) || (int)$f['min_age'] > 99)) { $errors[] = 'Idade mínima inválida.'; }
+    if (!$editing && (!ctype_digit($f['stock']))) { $errors[] = 'Estoque inicial inválido.'; }
+    $cs = $pdo->prepare('SELECT COUNT(*) FROM categories WHERE id = ?');
+    $cs->execute(array((int)$f['category_id']));
+    if (!$cs->fetchColumn()) { $errors[] = 'Selecione uma categoria.'; }
+
+    if (!$errors) {
+        try {
+            $pdo->beginTransaction();
+            $vals = array((int)$f['category_id'], $f['name'], $f['description'], $price, (int)$f['piece_count'],
+                          num_or_null($f['width_cm']), num_or_null($f['height_cm']), num_or_null($f['depth_cm']),
+                          $f['difficulty'], $f['min_age'] === '' ? null : (int)$f['min_age'],
+                          $f['architect_name'] === '' ? null : $f['architect_name'], (int)$f['is_published']);
+            if ($editing) {
+                $pdo->prepare('UPDATE products SET category_id=?, name=?, description=?, price=?, piece_count=?, width_cm=?, height_cm=?,
+                               depth_cm=?, difficulty=?, min_age=?, architect_name=?, is_published=?, is_sample=0 WHERE id=?')
+                    ->execute(array_merge($vals, array($id)));
+                $pid = $id;
+            } else {
+                $base = slugify($f['name']); $slug = $base; $n = 2;
+                $chk = $pdo->prepare('SELECT COUNT(*) FROM products WHERE slug = ?');
+                while (true) { $chk->execute(array($slug)); if (!$chk->fetchColumn()) { break; } $slug = $base . '-' . $n++; }
+                $pdo->prepare('INSERT INTO products (category_id, name, description, price, piece_count, width_cm, height_cm, depth_cm,
+                               difficulty, min_age, architect_name, is_published, slug, stock_quantity)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+                    ->execute(array_merge($vals, array($slug, (int)$f['stock'])));
+                $pid = (int)$pdo->lastInsertId();
+                if ((int)$f['stock'] > 0) {
+                    $pdo->prepare("INSERT INTO stock_movements (product_id, movement_type, quantity_change, stock_after, user_id, reason)
+                                   VALUES (?, 'entry', ?, ?, ?, 'Estoque inicial')")
+                        ->execute(array($pid, (int)$f['stock'], (int)$f['stock'], $admin['id']));
+                }
+            }
+            // imagem principal (uma por produto neste projeto básico)
+            $ex = $pdo->prepare('SELECT id FROM product_images WHERE product_id = ? ORDER BY is_primary DESC, sort_order ASC LIMIT 1');
+            $ex->execute(array($pid));
+            $imgId = $ex->fetchColumn();
+            if ($f['image_url'] !== '') {
+                if ($imgId) { $pdo->prepare('UPDATE product_images SET url = ? WHERE id = ?')->execute(array($f['image_url'], $imgId)); }
+                else { $pdo->prepare('INSERT INTO product_images (product_id, url, alt_text, is_primary) VALUES (?, ?, ?, 1)')
+                           ->execute(array($pid, $f['image_url'], $f['name'])); }
+            }
+            $pdo->commit();
+            flash('success', $editing ? 'Produto atualizado.' : 'Produto criado.');
+            redirect('admin/index.php');
+        } catch (Exception $ex) {
+            if ($pdo->inTransaction()) { $pdo->rollBack(); }
+            $errors[] = 'Erro ao salvar o produto.' . (DEBUG ? ' ' . $ex->getMessage() : '');
+        }
+    }
+}
+
+$cats = $pdo->query('SELECT id, name FROM categories ORDER BY name')->fetchAll();
+$pageTitle = $editing ? 'Editar produto' : 'Novo produto';
+include __DIR__ . '/../includes/header.php';
+?>
+<p><a href="<?php echo url('admin/index.php'); ?>">&larr; Painel</a></p>
+<h1><?php echo e($pageTitle); ?></h1>
+<?php foreach ($errors as $err): ?><div class="alert error"><?php echo e($err); ?></div><?php endforeach; ?>
+<div class="box">
+<form method="post">
+  <?php echo csrf_field(); ?>
+  <label>Nome <input type="text" name="name" value="<?php echo e($f['name']); ?>" required></label>
+  <label>Categoria
+    <select name="category_id" required>
+      <option value="">Selecione...</option>
+      <?php foreach ($cats as $c): ?>
+        <option value="<?php echo (int)$c['id']; ?>" <?php echo (int)$f['category_id'] === (int)$c['id'] ? 'selected' : ''; ?>><?php echo e($c['name']); ?></option>
+      <?php endforeach; ?>
+    </select>
+  </label>
+  <label>Descrição <textarea name="description" rows="4" required><?php echo e($f['description']); ?></textarea></label>
+  <div class="row wrap-row">
+    <label>Preço (R$) <input type="text" name="price" value="<?php echo e($f['price']); ?>" required></label>
+    <label>Peças <input type="number" name="piece_count" min="1" value="<?php echo e($f['piece_count']); ?>" required></label>
+    <label>Dificuldade
+      <select name="difficulty">
+        <?php foreach (array('beginner', 'intermediate', 'advanced', 'expert') as $d): ?>
+          <option value="<?php echo $d; ?>" <?php echo $f['difficulty'] === $d ? 'selected' : ''; ?>><?php echo e(diff_label($d)); ?></option>
+        <?php endforeach; ?>
+      </select>
+    </label>
+    <label>Idade mínima <input type="number" name="min_age" min="0" max="99" value="<?php echo e($f['min_age']); ?>"></label>
+  </div>
+  <div class="row wrap-row">
+    <label>Largura (cm) <input type="text" name="width_cm" value="<?php echo e($f['width_cm']); ?>"></label>
+    <label>Altura (cm) <input type="text" name="height_cm" value="<?php echo e($f['height_cm']); ?>"></label>
+    <label>Profundidade (cm) <input type="text" name="depth_cm" value="<?php echo e($f['depth_cm']); ?>"></label>
+  </div>
+  <label>Arquiteto (opcional) <input type="text" name="architect_name" value="<?php echo e($f['architect_name']); ?>"></label>
+  <label>Imagem (URL ou caminho, ex.: images/exemplo/torre-a.svg) <input type="text" name="image_url" value="<?php echo e($f['image_url']); ?>"></label>
+  <?php if (!$editing): ?>
+    <label>Estoque inicial <input type="number" name="stock" min="0" value="<?php echo e($f['stock']); ?>"></label>
+  <?php else: ?>
+    <p class="muted">Para alterar o estoque use a tela de <a href="<?php echo url('admin/estoque.php?id=' . $id); ?>">estoque</a> (fica registrado no histórico).</p>
+  <?php endif; ?>
+  <label class="check"><input type="checkbox" name="is_published" value="1" <?php echo $f['is_published'] === '1' ? 'checked' : ''; ?>> Publicado no catálogo</label>
+  <button class="btn" type="submit">Salvar</button>
+</form>
+</div>
+<?php include __DIR__ . '/../includes/footer.php'; ?>
