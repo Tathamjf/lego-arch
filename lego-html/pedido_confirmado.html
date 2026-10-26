@@ -1,0 +1,21 @@
+<?php
+require_once __DIR__ . '/includes/functions.php';
+$u = require_login();
+$id = (int)val($_GET, 'id', 0);
+$st = db()->prepare('SELECT id FROM orders WHERE id = ? AND user_id = ?');
+$st->execute(array($id, $u['id']));
+if (!$st->fetch()) { redirect('pedidos.html'); }
+$pageTitle = 'Pedido confirmado';
+include __DIR__ . '/includes/header.php';
+?>
+<section class="confirm">
+  <div class="tick"><?php echo icon('check'); ?></div>
+  <h1>Pedido confirmado!</h1>
+  <p>Obrigado por escolher a <?php echo e(SITE_NAME); ?>!</p>
+  <p>Seu pedido <strong><?php echo e(order_no($id)); ?></strong> foi recebido e está sendo preparado. Você pode acompanhar cada etapa na sua conta.</p>
+  <div class="actions-row">
+    <a class="btn light" href="<?php echo url('pedido.html?id=' . $id); ?>">Acompanhar pedido</a>
+    <a class="btn ghost" href="<?php echo url('index.html#catalogo'); ?>">Voltar para a loja</a>
+  </div>
+</section>
+<?php include __DIR__ . '/includes/footer.php'; ?>

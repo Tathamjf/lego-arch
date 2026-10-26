@@ -1,0 +1,84 @@
+<?php
+require_once __DIR__ . '/includes/functions.php';
+$u = require_login();
+$pdo = db();
+$id = (int)val($_GET, 'id', 0);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    csrf_check();
+    if (val($_POST, 'action') === 'cancel') {
+        $res = cancel_order($id, $u['id'], $u['id']);
+        if ($res === true) { flash('success', 'Pedido cancelado e itens devolvidos ao estoque.'); }
+        else { flash('error', $res); }
+    }
+    redirect('pedido.html?id=' . $id);
+}
+
+$st = $pdo->prepare('SELECT * FROM orders WHERE id = ? AND user_id = ?');
+$st->execute(array($id, $u['id']));
+$o = $st->fetch();
+if (!$o) { flash('error', 'Pedido não encontrado.'); redirect('pedidos.html'); }
+
+$it = $pdo->prepare('SELECT oi.product_id, oi.product_name, oi.unit_price, oi.quantity, oi.line_total,
+                            (SELECT url FROM product_images i WHERE i.product_id = oi.product_id ORDER BY i.is_primary DESC, i.sort_order ASC LIMIT 1) AS img
+                     FROM order_items oi WHERE oi.order_id = ?');
+$it->execute(array($id));
+$items = $it->fetchAll();
+
+$stepIndex = array('pending_payment' => 0, 'paid' => 0, 'processing' => 1, 'shipped' => 2, 'delivered' => 3);
+$steps = array('Pedido realizado', 'Em separação', 'Enviado', 'Entregue');
+$idx = isset($stepIndex[$o['status']]) ? $stepIndex[$o['status']] : -1;
+$canCancel = in_array($o['status'], array('pending_payment', 'paid', 'processing'), true);
+
+$pageTitle = 'Pedido ' . order_no($o['id']);
+include __DIR__ . '/includes/header.php';
+?>
+<h1 class="page-title">Detalhes do pedido <?php echo e(order_no($o['id'])); ?></h1>
+<p class="muted"><?php echo e(date('d/m/Y H:i', strtotime($o['created_at']))); ?> · <?php echo status_pill($o['status']); ?></p>
+
+<?php if ($idx >= 0): ?>
+<div class="track">
+  <?php foreach ($steps as $k => $label): ?>
+    <div class="step <?php echo $k <= $idx ? 'done' : ''; ?>">
+      <div class="circle"><?php if ($k <= $idx) { echo icon('check'); } ?></div><?php echo e($label); ?>
+    </div>
+  <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<div class="order-grid">
+  <div class="box">
+    <h2>Itens do pedido</h2>
+    <table class="table">
+      <thead><tr><th>Produto</th><th>Preço</th><th>Qtd.</th><th>Subtotal</th></tr></thead>
+      <tbody>
+      <?php foreach ($items as $i): ?>
+        <tr>
+          <td class="prod"><img src="<?php echo e(image_url($i['img'])); ?>" alt=""><?php echo e($i['product_name']); ?></td>
+          <td><?php echo money($i['unit_price']); ?></td>
+          <td><?php echo (int)$i['quantity']; ?></td>
+          <td><?php echo money($i['line_total']); ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <aside class="summary-card">
+    <h2>Endereço de entrega</h2>
+    <p><strong><?php echo e($o['ship_name']); ?></strong><br>
+      <?php echo e($o['ship_street'] . ', ' . $o['ship_number'] . ($o['ship_complement'] ? ' - ' . $o['ship_complement'] : '')); ?><br>
+      <?php echo e($o['ship_district'] . ' - ' . $o['ship_city'] . '/' . $o['ship_state']); ?><br>
+      CEP <?php echo e($o['ship_zip']); ?></p>
+    <div class="sum-row"><span>Subtotal</span><span><?php echo money($o['subtotal']); ?></span></div>
+    <div class="sum-row"><span>Frete</span><span><?php echo (float)$o['shipping_cost'] > 0 ? money($o['shipping_cost']) : 'Grátis'; ?></span></div>
+    <div class="sum-row total"><span>Total</span><span><?php echo money($o['total']); ?></span></div>
+    <?php if ($canCancel): ?>
+      <form method="post" onsubmit="return confirm('Cancelar este pedido?');" style="margin-top:14px">
+        <?php echo csrf_field(); ?><input type="hidden" name="action" value="cancel">
+        <button class="btn danger block" type="submit">Cancelar pedido</button>
+      </form>
+    <?php endif; ?>
+  </aside>
+</div>
+<p><a class="view-link" href="<?php echo url('pedidos.html'); ?>"><?php echo icon('arrowl'); ?> Voltar para meus pedidos</a></p>
+<?php include __DIR__ . '/includes/footer.php'; ?>
