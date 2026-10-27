@@ -4,6 +4,16 @@ Uma loja virtual desenvolvida em dupla como projeto acadêmico da **Fatec Mauá*
 
 A proposta consiste em criar uma loja especializada em conjuntos e projetos de LEGO inspirados na arquitetura, reunindo construções que representam edifícios, monumentos e estruturas arquitetônicas em uma experiência de compra on-line.
 
+## 🖼️ Demonstração do projeto
+
+<p align="center">
+  <img src="lego-html/screenshots/3.png" width="48%">
+  <img src="lego-html/screenshots/2.png" width="48%">
+  <img src="lego-html/screenshots/1.png" width="48%">
+  <img src="lego-html/screenshots/4.png" width="48%">
+  >
+</p>
+
 ## 🎯 Objetivo do projeto
 
 Desenvolver uma aplicação web funcional a partir de um tema livre, integrando tecnologias de front-end e back-end, além de conceitos de banco de dados, autenticação e gerenciamento de informações.
